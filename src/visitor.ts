@@ -32,7 +32,7 @@ export class GraphQLRequestVisitor extends ClientSideBaseVisitor<
 
     this._additionalImports.push(
       `import { ApolloClient } from 'apollo-client';`,
-      `import { FetchResult } from 'apollo-link';`,
+      `import { FetchResult, Observable } from 'apollo-link';`,
     )
   }
 
@@ -64,16 +64,16 @@ export class GraphQLRequestVisitor extends ClientSideBaseVisitor<
             v => v.type.kind !== Kind.NON_NULL_TYPE || v.defaultValue,
           )
         const doc = o.documentVariableName
-        const method = this.getOperationMethod(o.node.operation)
+        const { cliMethod, cliDocumentKey } = this.getOperationMethod(o.node.operation)
+        const returnType = this.getOperationReturnType(o.node.operation, o.operationResultType);
+        
         return `${o.node.name.value}(variables${
           optionalVariables ? '?' : ''
-        }: ${o.operationVariablesTypes}): Promise<FetchResult<${
-          o.operationResultType
-        }>> {
-  return client.${method}<${o.operationResultType}, ${
+        }: ${o.operationVariablesTypes}): ${returnType} {
+  return client.${cliMethod}<${o.operationResultType}, ${
           o.operationVariablesTypes
         }>({
-    ${o.node.operation}: ${doc},
+    ${cliDocumentKey || o.node.operation}: ${doc},
     variables,${
       o.node.operation === 'query' ? `\n    fetchPolicy: 'network-only',` : ''
     }
@@ -89,13 +89,34 @@ ${allPossibleActions.join(',\n')}
 }`
   }
 
+  private getOperationReturnType(operation: OperationTypeNode, operationResultType: string): string {
+    switch (operation) {
+      case 'subscription': {
+        return `Observable<FetchResult<${operationResultType}>>`
+      }
+      default: {
+        return `Promise<FetchResult<${operationResultType}>>`
+      }
+    }
+  }
+
   private getOperationMethod(operation: OperationTypeNode) {
     switch (operation) {
       case 'query': {
-        return 'query'
+        return {
+         cliMethod: 'query'
+        }
       }
       case 'mutation': {
-        return 'mutate'
+        return {
+          cliMethod: 'mutate'
+        }
+      }
+      case 'subscription': {
+        return {
+          cliMethod: 'subscribe',
+          cliDocumentKey: 'query'
+        }
       }
       default: {
         throw new Error(`unsupported operation: ${operation}`)
